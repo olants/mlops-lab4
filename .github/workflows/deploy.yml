@@ -15,76 +15,86 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Databricks CLI
+      - name: Fail fast if secrets missing
         run: |
-          python -m pip install --upgrade pip
-          # pip install "databricks-cli>=0.18.0"
-          pip install databricks-sdk==0.44.0
+          if [ -z "$DATABRICKS_HOST" ]; then
+            echo "DATABRICKS_HOST is empty. Add it in GitHub Secrets."
+            exit 1
+          fi
+          if [ -z "$DATABRICKS_TOKEN" ]; then
+            echo "DATABRICKS_TOKEN is empty. Add it in GitHub Secrets."
+            exit 1
+          fi
+          echo "Using host: $DATABRICKS_HOST"
+
+      - name: Install Databricks CLI (new)
+        run: |
+          # Official installer for the *new* Databricks CLI (provides `databricks` binary)
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
           databricks --version
 
- 
       - name: Check Databricks auth
-        env:
-          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
         run: |
           databricks workspace ls /
 
-      - name: Sync workspace files
+      - name: Sync workspace files (import notebook + monitoring)
         run: |
-          python - <<'PY'
-          import os, subprocess
+          # Use a folder that won't collide with an existing notebook
+          WS_ROOT="/Users/olants@gmail.com/mlops-lab4-repo"
 
-          env = os.environ.copy()
+          # Ensure folder exists
+          databricks workspace mkdirs "$WS_ROOT"
 
-          ws_root = "/Users/olants@gmail.com/mlops-lab4"
-          subprocess.check_call(["databricks", "workspace", "mkdirs", ws_root], env=env)
+          # Import notebook (Jupyter ipynb)
+          databricks workspace import \
+            --overwrite \
+            --format JUPYTER \
+            "mlops-lab4.ipynb" \
+            "$WS_ROOT/mlops-lab4"
 
-          # Import notebook from repo: mlops-lab4.ipynb -> workspace notebook /Users/.../mlops-lab4/mlops-lab4
-          subprocess.check_call([
-              "databricks", "workspace", "import",
-              "--overwrite",
-              "--format", "JUPYTER",
-              "mlops-lab4.ipynb",
-              f"{ws_root}/mlops-lab4"
-          ], env=env)
+          # Import monitoring directory (all .py files)
+          databricks workspace mkdirs "$WS_ROOT/monitoring"
+          databricks workspace import_dir \
+            --overwrite \
+            "monitoring" \
+            "$WS_ROOT/monitoring"
 
-          # Import monitoring scripts
-          subprocess.check_call([
-              "databricks", "workspace", "import",
-              "--overwrite",
-              "--format", "SOURCE",
-              "monitoring/drift_check.py",
-              f"{ws_root}/monitoring/drift_check.py"
-          ], env=env)
-
-          subprocess.check_call([
-              "databricks", "workspace", "import",
-              "--overwrite",
-              "--format", "SOURCE",
-              "monitoring/slo_probe.py",
-              f"{ws_root}/monitoring/slo_probe.py"
-          ], env=env)
-
-          print("Workspace sync done:", ws_root)
-          PY
+          echo "Workspace sync done: $WS_ROOT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform init/apply
+      - name: Terraform init/apply (base infra)
         working-directory: terraform
         run: |
           terraform init
           terraform apply -auto-approve \
             -var="databricks_host=${DATABRICKS_HOST}" \
             -var="databricks_token=${DATABRICKS_TOKEN}" \
-            -var="serving_token=${DATABRICKS_TOKEN}"
+            -var="serving_token=${DATABRICKS_TOKEN}" \
+            -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
+            -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
+            -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py"
 
-      - name: Get latest model version for green
+      - name: Trigger training job (optional but useful)
+        run: |
+          # If you output train_job_id, trigger it.
+          # If not, you can skip this step.
+          if terraform -chdir=terraform output -raw train_job_id >/tmp/train_job_id 2>/dev/null; then
+            JOB_ID=$(cat /tmp/train_job_id)
+            echo "Triggering train job: $JOB_ID"
+            databricks jobs run-now --job-id "$JOB_ID"
+          else
+            echo "No terraform output train_job_id found; skipping job trigger."
+          fi
+
+      - name: Update green to latest model version + re-apply Terraform
         env:
           MODEL_NAME: energy-lstm
         run: |
+          python -m pip install --upgrade pip
+          pip install databricks-sdk==0.44.0
+
           python - <<'PY'
           import os
           from databricks.sdk import WorkspaceClient
@@ -92,13 +102,24 @@ jobs:
           w = WorkspaceClient(host=os.environ["DATABRICKS_HOST"], token=os.environ["DATABRICKS_TOKEN"])
           model = os.environ["MODEL_NAME"]
 
-          # Find latest numeric version
-          versions = w.model_registry.list_model_versions(name=model)
+          versions = list(w.model_registry.list_model_versions(name=model))
+          if not versions:
+            raise SystemExit(f"No versions found for model {model}. Run training first.")
+
           latest = max(int(v.version) for v in versions)
           print("LATEST_VERSION", latest)
 
-          # Write TFVARS for green
           tfvars_path = "terraform/terraform.tfvars"
           with open(tfvars_path, "w", encoding="utf-8") as f:
-              f.write(f'green_model_version = "{latest}"\n')
+            f.write(f'green_model_version = "{latest}"\n')
+            f.write('blue_traffic_percent = 100\n')
+            f.write('green_traffic_percent = 0\n')
           PY
+
+          terraform -chdir=terraform apply -auto-approve \
+            -var="databricks_host=${DATABRICKS_HOST}" \
+            -var="databricks_token=${DATABRICKS_TOKEN}" \
+            -var="serving_token=${DATABRICKS_TOKEN}" \
+            -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
+            -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
+            -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py"
