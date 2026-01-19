@@ -88,3 +88,8 @@ variable "drift_s3_prefix" {
   type    = string
   default = "s3://lab3-databricks/drift"
 }
+
+variable "enable_serving" {
+  type    = bool
+  default = false
+}

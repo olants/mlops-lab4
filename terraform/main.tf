@@ -30,6 +30,9 @@ resource "databricks_cluster" "job_cluster" {
   node_type_id            = var.node_type_id
   num_workers             = 1
   autotermination_minutes = 30
+  data_security_mode = "SINGLE_USER"
+#  data_security_mode = "USER_ISOLATION"
+  single_user_name   = "olants@gmail.com"
 }
 
 # --- Training job (notebook) ---

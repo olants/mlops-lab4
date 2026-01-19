@@ -75,7 +75,8 @@ jobs:
             -var="serving_token=${DATABRICKS_TOKEN}" \
             -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
             -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
-            -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py"
+            -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
+            -var="enable_serving=false"
 
       - name: Trigger training job (optional but useful)
         run: |
@@ -123,4 +124,5 @@ jobs:
             -var="serving_token=${DATABRICKS_TOKEN}" \
             -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
             -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
-            -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py"
+            -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
+            -var="enable_serving=true"
