@@ -12,18 +12,14 @@ provider "databricks" {
   token = var.databricks_token
 }
 
-# Pick a supported LTS runtime + node type automatically
 data "databricks_spark_version" "lts" {
   long_term_support = true
 }
 
-# NOTE: if this still selects a blocked instance family in your workspace,
-# we can adjust selectors (min_cores/min_memory_gb) to force other types.
 data "databricks_node_type" "smallest" {
   local_disk = true
 }
 
-# --- Secrets ---
 resource "databricks_secret_scope" "lab4" {
   name = var.secret_scope_name
 }
@@ -34,8 +30,7 @@ resource "databricks_secret" "serving_token" {
   string_value = var.serving_token
 }
 
-# -------- JOBS (use job clusters, NOT a shared cluster) --------
-
+# ----------------- TRAIN JOB -----------------
 resource "databricks_job" "train" {
   name = "lab4-train-pipeline"
 
@@ -53,8 +48,6 @@ resource "databricks_job" "train" {
 
       data_security_mode = "SINGLE_USER"
       single_user_name   = var.single_user_name
-
-      autotermination_minutes = 20
     }
   }
 
@@ -67,6 +60,7 @@ resource "databricks_job" "train" {
   max_concurrent_runs = 1
 }
 
+# ----------------- DRIFT JOB -----------------
 resource "databricks_job" "drift" {
   name = "lab4-drift-check"
 
@@ -89,8 +83,6 @@ resource "databricks_job" "drift" {
 
       data_security_mode = "SINGLE_USER"
       single_user_name   = var.single_user_name
-
-      autotermination_minutes = 20
     }
 
     library {
@@ -98,13 +90,11 @@ resource "databricks_job" "drift" {
         package = "evidently==0.4.40"
       }
     }
-
     library {
       pypi {
         package = "pandas"
       }
     }
-
     library {
       pypi {
         package = "pyarrow"
@@ -121,6 +111,7 @@ resource "databricks_job" "drift" {
   max_concurrent_runs = 1
 }
 
+# ----------------- SLO JOB -----------------
 resource "databricks_job" "slo" {
   name = "lab4-slo-probe"
 
@@ -144,8 +135,6 @@ resource "databricks_job" "slo" {
 
       data_security_mode = "SINGLE_USER"
       single_user_name   = var.single_user_name
-
-      autotermination_minutes = 20
     }
 
     library {
@@ -153,7 +142,6 @@ resource "databricks_job" "slo" {
         package = "requests"
       }
     }
-
     library {
       pypi {
         package = "numpy"
@@ -170,7 +158,7 @@ resource "databricks_job" "slo" {
   max_concurrent_runs = 1
 }
 
-# --- Serving endpoint (only when enable_serving=true) ---
+# ----------------- SERVING (PHASE 2) -----------------
 resource "databricks_model_serving" "endpoint" {
   count = var.enable_serving ? 1 : 0
 
