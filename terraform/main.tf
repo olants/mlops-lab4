@@ -12,6 +12,7 @@ provider "databricks" {
   token = var.databricks_token
 }
 
+# --- Secret scope + serving token for SLO probe ---
 resource "databricks_secret_scope" "lab4" {
   name = var.secret_scope_name
 }
@@ -22,16 +23,16 @@ resource "databricks_secret" "serving_token" {
   string_value = var.serving_token
 }
 
-
+# --- Cluster for jobs ---
 resource "databricks_cluster" "job_cluster" {
   cluster_name            = "lab4-job-cluster"
   spark_version           = var.spark_version
   node_type_id            = var.node_type_id
-  autotermination_minutes = 30
   num_workers             = 1
+  autotermination_minutes = 30
 }
 
-# --- Train job (notebook) ---
+# --- Training job (notebook) ---
 resource "databricks_job" "train" {
   name = "lab4-train-pipeline"
 
@@ -72,9 +73,23 @@ resource "databricks_job" "drift" {
 
     existing_cluster_id = databricks_cluster.job_cluster.id
 
-    library { pypi { package = "evidently==0.4.40" } }
-    library { pypi { package = "pandas" } }
-    library { pypi { package = "pyarrow" } }
+    library {
+      pypi {
+        package = "evidently==0.4.40"
+      }
+    }
+
+    library {
+      pypi {
+        package = "pandas"
+      }
+    }
+
+    library {
+      pypi {
+        package = "pyarrow"
+      }
+    }
   }
 
   schedule {
@@ -85,7 +100,6 @@ resource "databricks_job" "drift" {
 
   max_concurrent_runs = 1
 }
-
 
 # --- SLO probe job (python) ---
 resource "databricks_job" "slo" {
@@ -106,8 +120,17 @@ resource "databricks_job" "slo" {
 
     existing_cluster_id = databricks_cluster.job_cluster.id
 
-    library { pypi { package = "requests" } }
-    library { pypi { package = "numpy" } }
+    library {
+      pypi {
+        package = "requests"
+      }
+    }
+
+    library {
+      pypi {
+        package = "numpy"
+      }
+    }
   }
 
   schedule {
@@ -119,25 +142,25 @@ resource "databricks_job" "slo" {
   max_concurrent_runs = 1
 }
 
-# --- Model Serving endpoint blue/green ---
+# --- Serving endpoint blue/green ---
 resource "databricks_model_serving" "endpoint" {
   name = var.serving_endpoint_name
 
   config {
     served_models {
-      name                   = "blue"
-      model_name             = var.registered_model_name
-      model_version          = var.blue_model_version
-      workload_size          = "Small"
-      scale_to_zero_enabled  = true
+      name                  = "blue"
+      model_name            = var.registered_model_name
+      model_version         = var.blue_model_version
+      workload_size         = "Small"
+      scale_to_zero_enabled = true
     }
 
     served_models {
-      name                   = "green"
-      model_name             = var.registered_model_name
-      model_version          = var.green_model_version
-      workload_size          = "Small"
-      scale_to_zero_enabled  = true
+      name                  = "green"
+      model_name            = var.registered_model_name
+      model_version         = var.green_model_version
+      workload_size         = "Small"
+      scale_to_zero_enabled = true
     }
 
     traffic_config {
