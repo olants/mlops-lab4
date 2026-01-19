@@ -72,7 +72,7 @@ resource "databricks_job" "drift" {
 
     existing_cluster_id = databricks_cluster.job_cluster.id
 
-    library { pypi { package = "evidently==0.4.41" } }
+    library { pypi { package = "evidently==0.4.40" } }
     library { pypi { package = "pandas" } }
     library { pypi { package = "pyarrow" } }
   }

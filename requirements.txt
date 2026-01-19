@@ -5,4 +5,4 @@ mlflow
 torch
 requests
 pyarrow
-evidently==0.4.41
+evidently==0.4.40
