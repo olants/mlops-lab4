@@ -80,7 +80,7 @@ jobs:
             -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
             -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
             -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
-            -var="enable_serving=false"
+            -var="enable_serving=false" \
             -var="secret_scope_name=lab4-mlops-${GITHUB_RUN_ID}"
 
 
@@ -151,5 +151,5 @@ jobs:
             -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
             -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
             -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
-            -var="enable_serving=true"
+            -var="enable_serving=true" \
             -var="secret_scope_name=lab4-mlops-${GITHUB_RUN_ID}"
