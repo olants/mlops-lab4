@@ -1,0 +1,4 @@
+blue_model_version  = "1"
+green_model_version = "1"
+blue_traffic_percent  = 100
+green_traffic_percent = 0

@@ -1,0 +1,93 @@
+name: Deploy Databricks (Terraform)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Databricks CLI (new)
+        run: |
+          pip install databricks-sdk==0.44.0
+
+      - name: Sync workspace files
+        run: |
+          python - <<'PY'
+          import os, subprocess
+
+          env = os.environ.copy()
+
+          ws_root = "/Users/olants@gmail.com/mlops-lab4"
+          subprocess.check_call(["databricks", "workspace", "mkdirs", ws_root], env=env)
+
+          # Import notebook from repo: mlops-lab4.ipynb -> workspace notebook /Users/.../mlops-lab4/mlops-lab4
+          subprocess.check_call([
+              "databricks", "workspace", "import",
+              "--overwrite",
+              "--format", "JUPYTER",
+              "mlops-lab4.ipynb",
+              f"{ws_root}/mlops-lab4"
+          ], env=env)
+
+          # Import monitoring scripts
+          subprocess.check_call([
+              "databricks", "workspace", "import",
+              "--overwrite",
+              "--format", "SOURCE",
+              "monitoring/drift_check.py",
+              f"{ws_root}/monitoring/drift_check.py"
+          ], env=env)
+
+          subprocess.check_call([
+              "databricks", "workspace", "import",
+              "--overwrite",
+              "--format", "SOURCE",
+              "monitoring/slo_probe.py",
+              f"{ws_root}/monitoring/slo_probe.py"
+          ], env=env)
+
+          print("Workspace sync done:", ws_root)
+          PY
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init/apply
+        working-directory: terraform
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="databricks_host=${DATABRICKS_HOST}" \
+            -var="databricks_token=${DATABRICKS_TOKEN}" \
+            -var="serving_token=${DATABRICKS_TOKEN}"
+
+      - name: Get latest model version for green
+        env:
+          MODEL_NAME: energy-lstm
+        run: |
+          python - <<'PY'
+          import os
+          from databricks.sdk import WorkspaceClient
+
+          w = WorkspaceClient(host=os.environ["DATABRICKS_HOST"], token=os.environ["DATABRICKS_TOKEN"])
+          model = os.environ["MODEL_NAME"]
+
+          # Find latest numeric version
+          versions = w.model_registry.list_model_versions(name=model)
+          latest = max(int(v.version) for v in versions)
+          print("LATEST_VERSION", latest)
+
+          # Write TFVARS for green
+          tfvars_path = "terraform/terraform.tfvars"
+          with open(tfvars_path, "w", encoding="utf-8") as f:
+              f.write(f'green_model_version = "{latest}"\n')
+          PY
