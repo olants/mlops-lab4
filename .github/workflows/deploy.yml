@@ -33,9 +33,14 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
           databricks --version
 
+      - name: Databricks CLI sanity
+        run: |
+          databricks --version
+          databricks workspace --help
+
       - name: Check Databricks auth
         run: |
-          databricks workspace ls /
+          databricks workspace list /
 
       - name: Sync workspace files (import notebook + monitoring)
         run: |
