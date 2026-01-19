@@ -14,7 +14,7 @@ variable "serving_token" {
 
 variable "secret_scope_name" {
   type    = string
-  default = "lab4-mlops" # avoids collision with existing "lab4"
+  default = "lab4-mlops"
 }
 
 variable "secret_key_name" {

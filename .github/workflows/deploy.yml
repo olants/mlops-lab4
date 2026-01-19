@@ -82,6 +82,7 @@ jobs:
             -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
             -var="enable_serving=false"
 
+
       - name: Trigger training job and wait for completion
         working-directory: terraform
         run: |
