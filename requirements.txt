@@ -6,3 +6,6 @@ torch
 requests
 pyarrow
 evidently==0.4.40
+databricks-sdk==0.44.0
+pytest
+ruff

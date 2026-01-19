@@ -29,12 +29,7 @@ jobs:
 
       - name: Install Databricks CLI (new)
         run: |
-          # Official installer for the *new* Databricks CLI (provides `databricks` binary)
           curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
-          databricks --version
-
-      - name: Databricks CLI sanity
-        run: |
           databricks --version
           databricks workspace --help
 
@@ -42,30 +37,39 @@ jobs:
         run: |
           databricks workspace list /
 
-      - name: Sync workspace files (import notebook + monitoring)
+      - name: Debug repo files
         run: |
-          # Use a folder that won't collide with an existing notebook
+          pwd
+          ls -la
+          find . -maxdepth 4 -name "*.ipynb" -print
+          find . -maxdepth 4 -name "drift_check.py" -print
+          find . -maxdepth 4 -name "slo_probe.py" -print
+
+      - name: Sync workspace files
+        run: |
           WS_ROOT="/Users/olants@gmail.com/mlops-lab4-repo"
 
           databricks workspace mkdirs "$WS_ROOT"
 
-          # Notebook import (single file) is fine with overwrite
+          # Import notebook (new CLI syntax)
           databricks workspace import "$WS_ROOT/mlops-lab4" \
             --overwrite \
             --format JUPYTER \
             --file "mlops-lab4.ipynb"
 
-          # Import the whole monitoring folder (recommended)
+          # Import monitoring directory (new CLI command is import-dir)
           databricks workspace import-dir "monitoring" "$WS_ROOT/monitoring" --overwrite
 
           databricks workspace list "$WS_ROOT"
           databricks workspace list "$WS_ROOT/monitoring"
+
           echo "Workspace sync done: $WS_ROOT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform init/apply (base infra)
+      # Phase 1: create jobs/cluster/secrets only (no serving)
+      - name: Terraform init/apply (infra only)
         working-directory: terraform
         run: |
           terraform init
@@ -78,19 +82,37 @@ jobs:
             -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
             -var="enable_serving=false"
 
-      - name: Trigger training job (optional but useful)
+      - name: Trigger training job and wait for completion
+        working-directory: terraform
         run: |
-          # If you output train_job_id, trigger it.
-          # If not, you can skip this step.
-          if terraform -chdir=terraform output -raw train_job_id >/tmp/train_job_id 2>/dev/null; then
-            JOB_ID=$(cat /tmp/train_job_id)
-            echo "Triggering train job: $JOB_ID"
-            databricks jobs run-now --job-id "$JOB_ID"
-          else
-            echo "No terraform output train_job_id found; skipping job trigger."
-          fi
+          TRAIN_JOB_ID="$(terraform output -raw train_job_id)"
+          echo "Train job id: $TRAIN_JOB_ID"
 
-      - name: Update green to latest model version + re-apply Terraform
+          RUN_ID="$(databricks jobs run-now --job-id "$TRAIN_JOB_ID" --output json | python -c "import sys, json; print(json.load(sys.stdin)['run_id'])")"
+          echo "Run id: $RUN_ID"
+
+          # Poll until run completes
+          for i in $(seq 1 120); do
+            STATE="$(databricks jobs get-run --run-id "$RUN_ID" --output json | python -c "import sys, json; j=json.load(sys.stdin); print(j['state']['life_cycle_state']+'|'+j['state'].get('result_state',''))")"
+            echo "State: $STATE"
+            LC="$(echo "$STATE" | cut -d'|' -f1)"
+            RS="$(echo "$STATE" | cut -d'|' -f2)"
+            if [ "$LC" = "TERMINATED" ] || [ "$LC" = "SKIPPED" ] || [ "$LC" = "INTERNAL_ERROR" ]; then
+              if [ "$RS" = "SUCCESS" ]; then
+                echo "Training succeeded."
+                exit 0
+              else
+                echo "Training failed: $STATE"
+                exit 1
+              fi
+            fi
+            sleep 10
+          done
+
+          echo "Timed out waiting for training run to finish"
+          exit 1
+
+      - name: Enable serving with latest model version (Phase 2)
         env:
           MODEL_NAME: energy-lstm
         run: |
@@ -106,13 +128,15 @@ jobs:
 
           versions = list(w.model_registry.list_model_versions(name=model))
           if not versions:
-            raise SystemExit(f"No versions found for model {model}. Run training first.")
+            raise SystemExit(f"No versions found for model {model}. Training didn't register it.")
 
           latest = max(int(v.version) for v in versions)
           print("LATEST_VERSION", latest)
 
+          # Write tfvars used by Terraform (optional)
           tfvars_path = "terraform/terraform.tfvars"
           with open(tfvars_path, "w", encoding="utf-8") as f:
+            f.write(f'blue_model_version = "{latest}"\n')
             f.write(f'green_model_version = "{latest}"\n')
             f.write('blue_traffic_percent = 100\n')
             f.write('green_traffic_percent = 0\n')

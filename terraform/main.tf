@@ -12,30 +12,39 @@ provider "databricks" {
   token = var.databricks_token
 }
 
-# --- Secret scope + serving token for SLO probe ---
+# Pick a supported LTS runtime + node type automatically
+data "databricks_spark_version" "lts" {
+  long_term_support = true
+}
+
+data "databricks_node_type" "smallest" {
+  local_disk = true
+}
+
+# Secret scope + secret for serving token
 resource "databricks_secret_scope" "lab4" {
   name = var.secret_scope_name
 }
 
 resource "databricks_secret" "serving_token" {
   scope        = databricks_secret_scope.lab4.name
-  key          = "serving_token"
+  key          = var.secret_key_name
   string_value = var.serving_token
 }
 
-# --- Cluster for jobs ---
+# Cluster for jobs (NO_ISOLATION not allowed -> SINGLE_USER)
 resource "databricks_cluster" "job_cluster" {
   cluster_name            = "lab4-job-cluster"
-  spark_version           = var.spark_version
-  node_type_id            = var.node_type_id
+  spark_version           = data.databricks_spark_version.lts.id
+  node_type_id            = data.databricks_node_type.smallest.id
   num_workers             = 1
   autotermination_minutes = 30
+
   data_security_mode = "SINGLE_USER"
-#  data_security_mode = "USER_ISOLATION"
-  single_user_name   = "olants@gmail.com"
+  single_user_name   = var.single_user_name
 }
 
-# --- Training job (notebook) ---
+# Training job (notebook)
 resource "databricks_job" "train" {
   name = "lab4-train-pipeline"
 
@@ -58,7 +67,7 @@ resource "databricks_job" "train" {
   max_concurrent_runs = 1
 }
 
-# --- Drift job (python) ---
+# Drift job (python)
 resource "databricks_job" "drift" {
   name = "lab4-drift-check"
 
@@ -104,7 +113,7 @@ resource "databricks_job" "drift" {
   max_concurrent_runs = 1
 }
 
-# --- SLO probe job (python) ---
+# SLO probe job (python)
 resource "databricks_job" "slo" {
   name = "lab4-slo-probe"
 
@@ -117,7 +126,7 @@ resource "databricks_job" "slo" {
         "--endpoint", var.serving_endpoint_name,
         "--samples", "50",
         "--secret_scope", var.secret_scope_name,
-        "--secret_key", "serving_token"
+        "--secret_key", var.secret_key_name
       ]
     }
 
@@ -145,8 +154,10 @@ resource "databricks_job" "slo" {
   max_concurrent_runs = 1
 }
 
-# --- Serving endpoint blue/green ---
+# Serving endpoint (created only when enable_serving=true)
 resource "databricks_model_serving" "endpoint" {
+  count = var.enable_serving ? 1 : 0
+
   name = var.serving_endpoint_name
 
   config {

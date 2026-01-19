@@ -5,13 +5,12 @@ import requests
 
 
 def _get_dbutils_secret(scope: str, key: str) -> str:
-    # Works in Databricks jobs/notebooks
     try:
         dbutils  # noqa: F821
         return dbutils.secrets.get(scope, key)  # type: ignore # noqa: F821
     except Exception as e:
         raise RuntimeError(
-            "dbutils.secrets is not available. This script must run on a Databricks cluster."
+            "dbutils.secrets is not available. Run this on a Databricks cluster."
         ) from e
 
 
@@ -54,7 +53,7 @@ def main():
 
     print(f"SLO PROBE: samples={args.samples} p95_ms={p95:.2f} p99_ms={p99:.2f} error_rate={err_rate:.3f}")
 
-    # Lab-friendly SLO thresholds (tune if needed)
+    # Tune thresholds for lab demo
     if err_rate > 0.02 or p99 > 2000:
         raise SystemExit("SLO FAILED")
 

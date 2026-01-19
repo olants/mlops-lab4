@@ -7,14 +7,24 @@ variable "databricks_token" {
   sensitive = true
 }
 
-variable "secret_scope_name" {
-  type    = string
-  default = "lab4"
-}
-
 variable "serving_token" {
   type      = string
   sensitive = true
+}
+
+variable "secret_scope_name" {
+  type    = string
+  default = "lab4-mlops" # avoids collision with existing "lab4"
+}
+
+variable "secret_key_name" {
+  type    = string
+  default = "serving_token"
+}
+
+variable "single_user_name" {
+  type    = string
+  default = "olants@gmail.com"
 }
 
 variable "train_notebook_path" {
@@ -39,16 +49,6 @@ variable "serving_endpoint_name" {
   default = "energy-prod"
 }
 
-variable "spark_version" {
-  type    = string
-  default = "14.3.x-scala2.12"
-}
-
-variable "node_type_id" {
-  type    = string
-  default = "m5d.large"
-}
-
 variable "train_cron" {
   type    = string
   default = "0 0 7 * * ?"
@@ -62,6 +62,11 @@ variable "drift_cron" {
 variable "slo_cron" {
   type    = string
   default = "0 0/30 * * * ?"
+}
+
+variable "enable_serving" {
+  type    = bool
+  default = false
 }
 
 variable "blue_model_version" {
@@ -87,9 +92,4 @@ variable "green_traffic_percent" {
 variable "drift_s3_prefix" {
   type    = string
   default = "s3://lab3-databricks/drift"
-}
-
-variable "enable_serving" {
-  type    = bool
-  default = false
 }
