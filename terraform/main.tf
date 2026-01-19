@@ -12,14 +12,7 @@ provider "databricks" {
   token = var.databricks_token
 }
 
-data "databricks_spark_version" "lts" {
-  long_term_support = true
-}
-
-data "databricks_node_type" "smallest" {
-  local_disk = true
-}
-
+# ----------------- Secrets -----------------
 resource "databricks_secret_scope" "lab4" {
   name = var.secret_scope_name
 }
@@ -28,6 +21,19 @@ resource "databricks_secret" "serving_token" {
   scope        = databricks_secret_scope.lab4.name
   key          = var.secret_key_name
   string_value = var.serving_token
+}
+
+# ----------------- Serverless Job Environment -----------------
+# This makes Jobs compatible with "Only serverless compute is supported".
+resource "databricks_job_environment" "serverless" {
+  name = "lab4-serverless-env"
+
+  environment {
+    # Use serverless compute
+    spec {
+      client = "1"
+    }
+  }
 }
 
 # ----------------- TRAIN JOB -----------------
@@ -41,14 +47,8 @@ resource "databricks_job" "train" {
       notebook_path = var.train_notebook_path
     }
 
-    new_cluster {
-      spark_version = data.databricks_spark_version.lts.id
-      node_type_id  = data.databricks_node_type.smallest.id
-      num_workers   = 1
-
-      data_security_mode = "SINGLE_USER"
-      single_user_name   = var.single_user_name
-    }
+    # ✅ Serverless-only workspace fix
+    environment_key = databricks_job_environment.serverless.key
   }
 
   schedule {
@@ -76,30 +76,18 @@ resource "databricks_job" "drift" {
       ]
     }
 
-    new_cluster {
-      spark_version = data.databricks_spark_version.lts.id
-      node_type_id  = data.databricks_node_type.smallest.id
-      num_workers   = 1
+    library {
+      pypi { package = "evidently==0.4.40" }
+    }
+    library {
+      pypi { package = "pandas" }
+    }
+    library {
+      pypi { package = "pyarrow" }
+    }
 
-      data_security_mode = "SINGLE_USER"
-      single_user_name   = var.single_user_name
-    }
-
-    library {
-      pypi {
-        package = "evidently==0.4.40"
-      }
-    }
-    library {
-      pypi {
-        package = "pandas"
-      }
-    }
-    library {
-      pypi {
-        package = "pyarrow"
-      }
-    }
+    # ✅ Serverless-only workspace fix
+    environment_key = databricks_job_environment.serverless.key
   }
 
   schedule {
@@ -128,25 +116,15 @@ resource "databricks_job" "slo" {
       ]
     }
 
-    new_cluster {
-      spark_version = data.databricks_spark_version.lts.id
-      node_type_id  = data.databricks_node_type.smallest.id
-      num_workers   = 1
-
-      data_security_mode = "SINGLE_USER"
-      single_user_name   = var.single_user_name
-    }
-
     library {
-      pypi {
-        package = "requests"
-      }
+      pypi { package = "requests" }
     }
     library {
-      pypi {
-        package = "numpy"
-      }
+      pypi { package = "numpy" }
     }
+
+    # ✅ Serverless-only workspace fix
+    environment_key = databricks_job_environment.serverless.key
   }
 
   schedule {
@@ -158,7 +136,7 @@ resource "databricks_job" "slo" {
   max_concurrent_runs = 1
 }
 
-# ----------------- SERVING (PHASE 2) -----------------
+# ----------------- SERVING (Phase 2) -----------------
 resource "databricks_model_serving" "endpoint" {
   count = var.enable_serving ? 1 : 0
 

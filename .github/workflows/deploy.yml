@@ -81,6 +81,7 @@ jobs:
             -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
             -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
             -var="enable_serving=false"
+            -var="secret_scope_name=lab4-mlops-${GITHUB_RUN_ID}"
 
 
       - name: Trigger training job and wait for completion
@@ -151,3 +152,4 @@ jobs:
             -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
             -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
             -var="enable_serving=true"
+            -var="secret_scope_name=lab4-mlops-${GITHUB_RUN_ID}"
