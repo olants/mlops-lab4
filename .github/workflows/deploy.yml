@@ -47,32 +47,20 @@ jobs:
           # Use a folder that won't collide with an existing notebook
           WS_ROOT="/Users/olants@gmail.com/mlops-lab4-repo"
 
-          # Ensure folder exists
           databricks workspace mkdirs "$WS_ROOT"
-          databricks workspace mkdirs "$WS_ROOT/monitoring"
 
-          # Import notebook (Jupyter ipynb)
+          # Notebook import (single file) is fine with overwrite
           databricks workspace import "$WS_ROOT/mlops-lab4" \
             --overwrite \
             --format JUPYTER \
             --file "mlops-lab4.ipynb"
 
-          # Import monitoring scripts (SOURCE format)
-          databricks workspace import "$WS_ROOT/monitoring/drift_check.py" \
-            --overwrite \
-            --format SOURCE \
-            --file "monitoring/drift_check.py"
-
-          databricks workspace import "$WS_ROOT/monitoring/slo_probe.py" \
-            --overwrite \
-            --format SOURCE \
-            --file "monitoring/slo_probe.py"
+          # Import the whole monitoring folder (recommended)
+          databricks workspace import-dir "monitoring" "$WS_ROOT/monitoring" --overwrite
 
           databricks workspace list "$WS_ROOT"
           databricks workspace list "$WS_ROOT/monitoring"
-
           echo "Workspace sync done: $WS_ROOT"
-
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
