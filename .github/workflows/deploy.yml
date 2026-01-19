@@ -49,22 +49,30 @@ jobs:
 
           # Ensure folder exists
           databricks workspace mkdirs "$WS_ROOT"
+          databricks workspace mkdirs "$WS_ROOT/monitoring"
 
           # Import notebook (Jupyter ipynb)
-          databricks workspace import \
+          databricks workspace import "$WS_ROOT/mlops-lab4" \
             --overwrite \
             --format JUPYTER \
-            "mlops-lab4.ipynb" \
-            "$WS_ROOT/mlops-lab4"
+            --file "mlops-lab4.ipynb"
 
-          # Import monitoring directory (all .py files)
-          databricks workspace mkdirs "$WS_ROOT/monitoring"
-          databricks workspace import_dir \
+          # Import monitoring scripts (SOURCE format)
+          databricks workspace import "$WS_ROOT/monitoring/drift_check.py" \
             --overwrite \
-            "monitoring" \
-            "$WS_ROOT/monitoring"
+            --format SOURCE \
+            --file "monitoring/drift_check.py"
+
+          databricks workspace import "$WS_ROOT/monitoring/slo_probe.py" \
+            --overwrite \
+            --format SOURCE \
+            --file "monitoring/slo_probe.py"
+
+          databricks workspace list "$WS_ROOT"
+          databricks workspace list "$WS_ROOT/monitoring"
 
           echo "Workspace sync done: $WS_ROOT"
+
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
