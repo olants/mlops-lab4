@@ -84,6 +84,12 @@ jobs:
             -var="aws_region=${AWS_REGION}"
 
       # ---------- Trigger Databricks Jobs ----------
+      - name: CLI sanity
+        run: |
+          databricks jobs --help
+          databricks jobs get-run --help
+
+
       - name: Trigger TRAIN job
         run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_TRAIN_JOB_ID }}" --wait
 
