@@ -102,10 +102,10 @@ jobs:
 
 
       - name: Trigger DRIFT job (Evidently)
-        run: python .github/scripts/run_databricks_job.py "${{ env.DATABRICKS_DRIFT_JOB_ID }}" --wait
+        run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_DRIFT_JOB_ID }}" --wait
 
       - name: Trigger SLO job (publishes CloudWatch metrics)
-        run: python .github/scripts/run_databricks_job.py "${{ env.DATABRICKS_SLO_JOB_ID }}" --wait
+        run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_SLO_JOB_ID }}" --wait
 
       # ---------- Resolve serving URL ----------
       - name: Resolve serving endpoint URL
