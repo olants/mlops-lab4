@@ -7,143 +7,137 @@ import statistics
 import time
 from typing import List, Tuple
 
-import numpy as np
-import requests
 import boto3
+import requests
 
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--endpoint", required=True, help="Databricks serving endpoint name, e.g. energy-prod")
-    p.add_argument("--samples", type=int, default=50, help="Number of requests to send")
-    p.add_argument("--timeout_sec", type=float, default=2.0, help="HTTP timeout per request")
-    p.add_argument("--secret_scope", default="", help="If running inside Databricks, scope for token secret")
-    p.add_argument("--secret_key", default="", help="If running inside Databricks, key for token secret")
-    p.add_argument("--cloudwatch_namespace", default="Lab4/SLO")
-    p.add_argument("--region", default=os.getenv("AWS_REGION", "us-east-1"))
-
-    # SLO thresholds (edit to your lab requirements)
-    p.add_argument("--slo_p95_ms", type=float, default=500.0)
-    p.add_argument("--slo_p99_ms", type=float, default=1000.0)
-    p.add_argument("--slo_error_pct", type=float, default=5.0)
-
-    return p.parse_args()
+def pct(p: float, xs: List[float]) -> float:
+    """Percentile with simple nearest-rank method."""
+    if not xs:
+        return float("nan")
+    xs = sorted(xs)
+    k = int(round((p / 100.0) * (len(xs) - 1)))
+    k = max(0, min(k, len(xs) - 1))
+    return xs[k]
 
 
-def get_databricks_token(args) -> str:
-    # Prefer env var (works in GitHub Actions too)
-    tok = os.getenv("DATABRICKS_TOKEN")
-    if tok:
-        return tok
-
-    # If running inside Databricks: read secret
-    if args.secret_scope and args.secret_key:
-        try:
-            # dbutils exists only inside Databricks notebooks/jobs
-            tok = dbutils.secrets.get(args.secret_scope, args.secret_key)  # type: ignore  # noqa: F821
-            return tok
-        except Exception as e:
-            raise RuntimeError(f"Failed to read token from dbutils.secrets: {e}")
-
-    raise RuntimeError("No Databricks token found. Set DATABRICKS_TOKEN env var or provide secret_scope/secret_key.")
-
-
-def build_url(endpoint_name: str) -> str:
-    host = os.getenv("DATABRICKS_HOST", "").rstrip("/")
-    if not host:
-        raise RuntimeError("DATABRICKS_HOST env var is missing")
-    return f"{host}/serving-endpoints/{endpoint_name}/invocations"
-
-
-def make_payload() -> dict:
-    # Generate a plausible sample (adjust ranges if you want)
-    pressure = random.uniform(80, 140)
-    flow = random.uniform(2.0, 6.0)
-    radius = random.uniform(0.2, 0.5)
-
+def make_sample() -> dict:
+    # simple reasonable ranges; adjust if you want
     return {
-        "dataframe_split": {
-            "columns": ["pressure", "flow", "radius"],
-            "data": [[pressure, flow, radius]],
-        }
+        "pressure": float(random.uniform(80, 140)),
+        "flow": float(random.uniform(2.0, 6.0)),
+        "radius": float(random.uniform(0.2, 0.45)),
     }
 
 
-def pctl(values: List[float], q: float) -> float:
-    # numpy percentile is easiest and robust
-    if not values:
-        return float("nan")
-    return float(np.percentile(np.array(values, dtype=float), q))
+def infer_serving_url(host: str, endpoint_name: str) -> str:
+    # Databricks model serving invocations URL (classic)
+    host = host.rstrip("/")
+    return f"{host}/serving-endpoints/{endpoint_name}/invocations"
 
 
-def call_endpoint(url: str, token: str, timeout_sec: float) -> Tuple[bool, float]:
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    payload = make_payload()
+def call_endpoint(url: str, token: str, sample: dict, timeout_sec: int) -> Tuple[bool, float]:
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "dataframe_split": {
+            "columns": ["pressure", "flow", "radius"],
+            "data": [[sample["pressure"], sample["flow"], sample["radius"]]],
+        }
+    }
 
     t0 = time.perf_counter()
     try:
         r = requests.post(url, headers=headers, data=json.dumps(payload), timeout=timeout_sec)
-        dt_ms = (time.perf_counter() - t0) * 1000.0
-        if r.status_code >= 200 and r.status_code < 300:
-            return True, dt_ms
-        return False, dt_ms
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        ok = (200 <= r.status_code < 300)
+        return ok, latency_ms
     except Exception:
-        dt_ms = (time.perf_counter() - t0) * 1000.0
-        return False, dt_ms
-
-
-def put_cloudwatch(namespace: str, region: str, p95_ms: float, p99_ms: float, err_rate_pct: float):
-    cw = boto3.client("cloudwatch", region_name=region)
-    cw.put_metric_data(
-        Namespace=namespace,
-        MetricData=[
-            {"MetricName": "LatencyP95Ms", "Value": p95_ms, "Unit": "Milliseconds"},
-            {"MetricName": "LatencyP99Ms", "Value": p99_ms, "Unit": "Milliseconds"},
-            {"MetricName": "ErrorRatePct", "Value": err_rate_pct, "Unit": "Percent"},
-        ],
-    )
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+        return False, latency_ms
 
 
 def main():
-    args = parse_args()
-    token = get_databricks_token(args)
-    url = build_url(args.endpoint)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--endpoint", required=True, help="Serving endpoint name (e.g. energy-prod)")
+    ap.add_argument("--samples", type=int, default=50)
+    ap.add_argument("--timeout_sec", type=int, default=2)
 
-    ok_count = 0
+    ap.add_argument("--secret_scope", required=True)
+    ap.add_argument("--secret_key", default="serving_token")
+
+    ap.add_argument("--aws_region", default=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1")
+    ap.add_argument("--cw_namespace", default="Lab4/SLO")
+
+    # SLO thresholds (optional; helps “fail the job” if violated)
+    ap.add_argument("--p95_threshold_ms", type=float, default=1500.0)
+    ap.add_argument("--error_rate_threshold_pct", type=float, default=5.0)
+
+    args = ap.parse_args()
+
+    # ---- Read Databricks token from Secrets ----
+    # In a Databricks job, dbutils is available.
+    try:
+        token = dbutils.secrets.get(args.secret_scope, args.secret_key)  # type: ignore[name-defined]
+    except Exception as e:
+        raise RuntimeError(
+            f"Cannot read Databricks secret scope='{args.secret_scope}' key='{args.secret_key}'. "
+            f"Check Databricks -> Settings -> Secret scopes."
+        ) from e
+
+    host = os.environ.get("DATABRICKS_HOST", "").strip()
+    if not host:
+        raise RuntimeError("DATABRICKS_HOST env var is missing in the cluster/job environment.")
+
+    url = infer_serving_url(host, args.endpoint)
+
     latencies: List[float] = []
+    errors = 0
 
     for _ in range(args.samples):
-        ok, dt_ms = call_endpoint(url, token, args.timeout_sec)
-        latencies.append(dt_ms)
-        if ok:
-            ok_count += 1
+        ok, latency_ms = call_endpoint(url, token, make_sample(), args.timeout_sec)
+        latencies.append(latency_ms)
+        if not ok:
+            errors += 1
 
-    total = len(latencies)
-    err_count = total - ok_count
-    err_rate_pct = (err_count / total * 100.0) if total else 100.0
+    p50_ms = pct(50, latencies)
+    p95_ms = pct(95, latencies)
+    p99_ms = pct(99, latencies)
+    err_rate_pct = (errors / max(1, args.samples)) * 100.0
 
-    p95_ms = pctl(latencies, 95)
-    p99_ms = pctl(latencies, 99)
+    print(json.dumps({
+        "endpoint": args.endpoint,
+        "samples": args.samples,
+        "errors": errors,
+        "error_rate_pct": err_rate_pct,
+        "p50_ms": p50_ms,
+        "p95_ms": p95_ms,
+        "p99_ms": p99_ms,
+    }, indent=2))
 
-    print(f"Endpoint: {args.endpoint}")
-    print(f"Samples: {total}, OK: {ok_count}, Errors: {err_count}, ErrorRatePct: {err_rate_pct:.2f}")
-    print(f"Latency ms: p95={p95_ms:.1f}, p99={p99_ms:.1f}, mean={statistics.mean(latencies):.1f}")
+    # ---- Push to CloudWatch ----
+    cw = boto3.client("cloudwatch", region_name=args.aws_region)
+    cw.put_metric_data(
+        Namespace=args.cw_namespace,
+        MetricData=[
+            {"MetricName": "LatencyP50Ms", "Value": float(p50_ms), "Unit": "Milliseconds"},
+            {"MetricName": "LatencyP95Ms", "Value": float(p95_ms), "Unit": "Milliseconds"},
+            {"MetricName": "LatencyP99Ms", "Value": float(p99_ms), "Unit": "Milliseconds"},
+            {"MetricName": "ErrorRatePct", "Value": float(err_rate_pct), "Unit": "Percent"},
+        ],
+    )
 
-    # Publish metrics
-    put_cloudwatch(args.cloudwatch_namespace, args.region, p95_ms, p99_ms, err_rate_pct)
-    print(f"Published CloudWatch metrics to {args.cloudwatch_namespace} in {args.region}")
-
-    # Enforce SLO (fail job if violated)
+    # ---- Optional: fail job when SLO violated (useful for alerting) ----
     violated = []
-    if p95_ms > args.slo_p95_ms:
-        violated.append(f"p95_ms {p95_ms:.1f} > {args.slo_p95_ms}")
-    if p99_ms > args.slo_p99_ms:
-        violated.append(f"p99_ms {p99_ms:.1f} > {args.slo_p99_ms}")
-    if err_rate_pct > args.slo_error_pct:
-        violated.append(f"err_rate_pct {err_rate_pct:.2f} > {args.slo_error_pct}")
+    if p95_ms > args.p95_threshold_ms:
+        violated.append(f"p95_ms={p95_ms:.1f} > {args.p95_threshold_ms}")
+    if err_rate_pct > args.error_rate_threshold_pct:
+        violated.append(f"err_rate_pct={err_rate_pct:.2f} > {args.error_rate_threshold_pct}")
 
     if violated:
-        raise SystemExit("SLO VIOLATION: " + "; ".join(violated))
+        raise SystemExit("SLO_VIOLATION: " + "; ".join(violated))
 
 
 if __name__ == "__main__":
