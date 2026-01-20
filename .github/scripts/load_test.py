@@ -1,4 +1,4 @@
-import argparse, json, random, statistics, time
+import argparse, json, random, statistics, time, os
 import requests
 
 SAMPLE_GOOD = {
@@ -16,19 +16,23 @@ SAMPLE_BAD = {
 }
 
 def percentile(xs, p):
-    if not xs: return None
+    if not xs:
+        return None
     xs = sorted(xs)
-    k = int(round((p/100) * (len(xs)-1)))
+    k = int(round((p / 100) * (len(xs) - 1)))
     return xs[k]
 
-def run(url, duration, rps, timeout, mode):
+def run(url, duration, rps, timeout, mode, token):
     end = time.time() + duration
     lat = []
     ok = 0
     err = 0
+    first_err_logged = False
 
     session = requests.Session()
     headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
 
     while time.time() < end:
         t0 = time.time()
@@ -39,12 +43,20 @@ def run(url, duration, rps, timeout, mode):
             r = session.post(url, headers=headers, data=json.dumps(payload), timeout=timeout)
             dt = (time.time() - t0) * 1000.0
             lat.append(dt)
+
             if 200 <= r.status_code < 300:
                 ok += 1
             else:
                 err += 1
-        except Exception:
+                if not first_err_logged:
+                    first_err_logged = True
+                    body = (r.text or "")[:500]
+                    print(f"[DEBUG] First error: status={r.status_code} body={body!r}")
+        except Exception as e:
             err += 1
+            if not first_err_logged:
+                first_err_logged = True
+                print(f"[DEBUG] First exception: {type(e).__name__}: {e}")
 
         # pace to RPS
         sleep = max(0.0, (1.0 / rps) - (time.time() - t0))
@@ -70,9 +82,13 @@ if __name__ == "__main__":
     ap.add_argument("--timeout", type=float, required=True)
     ap.add_argument("--mode", choices=["normal", "failure"], required=True)
     ap.add_argument("--assert_recovery", action="store_true")
+    ap.add_argument("--token", default=os.getenv("DATABRICKS_TOKEN"), help="Databricks PAT (defaults to env DATABRICKS_TOKEN)")
     args = ap.parse_args()
 
-    res = run(args.url, args.duration, args.rps, args.timeout, args.mode)
+    if not args.token:
+        raise SystemExit("Missing Databricks token. Provide --token or set DATABRICKS_TOKEN env var.")
+
+    res = run(args.url, args.duration, args.rps, args.timeout, args.mode, args.token)
     print(json.dumps(res, indent=2))
 
     # Recovery gate (tune thresholds to your lab SLOs)
