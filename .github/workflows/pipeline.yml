@@ -96,10 +96,8 @@ jobs:
           databricks jobs --help
           databricks jobs get-run --help
 
-
       - name: Trigger TRAIN job
         run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_TRAIN_JOB_ID }}" --wait
-
 
       - name: Trigger DRIFT job (Evidently)
         run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_DRIFT_JOB_ID }}" --wait
