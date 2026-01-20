@@ -11,6 +11,12 @@ locals {
   metric_err = "ErrorRatePct"
 }
 
+library {
+  pypi {
+    package = "evidently==0.4.40"
+  }
+}
+
 resource "aws_cloudwatch_dashboard" "lab4" {
   dashboard_name = "lab4-mlops-dashboard"
   dashboard_body = jsonencode({

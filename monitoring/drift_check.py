@@ -1,12 +1,24 @@
+import sys
+import subprocess
+
+def _ensure_pkg(pkg: str):
+    try:
+        __import__(pkg.split("==")[0].split("[")[0])
+    except Exception:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+
+# Evidently versions: for py3.11 use >=0.4.40 (0.4.41 may not exist)
+_ensure_pkg("evidently==0.4.40")
+
+from evidently.report import Report
+from evidently.metric_preset import DataDriftPreset
+
+
 import argparse
 import os
 from datetime import datetime
 
 import pandas as pd
-
-from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset
-
 
 def _spark_read_parquet_any(spark, path: str):
     try:
