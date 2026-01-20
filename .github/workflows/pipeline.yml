@@ -1,0 +1,132 @@
+name: Lab4 - Sync + Run Jobs + Load Test + Monitoring
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  lab4:
+    runs-on: ubuntu-latest
+    env:
+      # Databricks
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+      # Workspace sync
+      WS_ROOT: /Users/olants@gmail.com/mlops-lab4-repo
+      NOTEBOOK_LOCAL: mlops-lab4.ipynb
+      NOTEBOOK_WS: /Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4
+
+      # Job names (must exist in Databricks UI)
+      TRAIN_JOB_NAME: lab4-train-pipeline
+      DRIFT_JOB_NAME: lab4-drift-check
+      SLO_JOB_NAME: lab4-slo-probe
+
+      # Serving endpoint
+      SERVING_ENDPOINT_NAME: energy-prod
+
+      # Load test knobs (tune for demo)
+      LOADTEST_DURATION_SEC: "60"
+      LOADTEST_RPS: "5"
+      FAILURE_BURST_SEC: "20"
+      TIMEOUT_SEC: "2"
+
+      AWS_REGION: us-east-1
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- Databricks CLI ----------
+      - name: Install Databricks CLI (new)
+        run: |
+          set -e
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+          databricks version
+
+      - name: Verify Databricks auth
+        run: |
+          databricks workspace list /
+
+      # ---------- Sync workspace ----------
+      - name: Sync workspace (notebook + monitoring)
+        run: |
+          set -e
+          databricks workspace mkdirs "$WS_ROOT"
+
+          databricks workspace import "$NOTEBOOK_WS" \
+            --overwrite \
+            --format JUPYTER \
+            --file "$NOTEBOOK_LOCAL"
+
+          databricks workspace import-dir "monitoring" "$WS_ROOT/monitoring" --overwrite
+
+          echo "Workspace sync done:"
+          databricks workspace list "$WS_ROOT"
+          databricks workspace list "$WS_ROOT/monitoring"
+
+      # ---------- Terraform monitoring (AWS only) ----------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform apply (CloudWatch dashboard + alarms)
+        working-directory: terraform/monitoring
+        run: |
+          terraform init
+          terraform apply -auto-approve \
+            -var="aws_region=${AWS_REGION}"
+
+      # ---------- Trigger Databricks Jobs ----------
+      - name: Trigger TRAIN job
+        run: python .github/scripts/run_databricks_job.py "${{ env.TRAIN_JOB_NAME }}" --wait
+
+      - name: Trigger DRIFT job (Evidently)
+        run: python .github/scripts/run_databricks_job.py "${{ env.DRIFT_JOB_NAME }}" --wait
+
+      - name: Trigger SLO job (publishes CloudWatch metrics)
+        run: python .github/scripts/run_databricks_job.py "${{ env.SLO_JOB_NAME }}" --wait
+
+      # ---------- Resolve serving URL ----------
+      - name: Resolve serving endpoint URL
+        run: |
+          python .github/scripts/get_serving_url.py "${{ env.SERVING_ENDPOINT_NAME }}" > serving_url.txt
+          echo "Serving URL:"
+          cat serving_url.txt
+
+      # ---------- Load test (normal) ----------
+      - name: Load test endpoint (steady traffic)
+        run: |
+          python .github/scripts/load_test.py \
+            --url "$(cat serving_url.txt)" \
+            --duration "${LOADTEST_DURATION_SEC}" \
+            --rps "${LOADTEST_RPS}" \
+            --timeout "${TIMEOUT_SEC}" \
+            --mode normal
+
+      # ---------- Simulate failure ----------
+      - name: Simulate failure (bad payload + timeout burst)
+        run: |
+          python .github/scripts/load_test.py \
+            --url "$(cat serving_url.txt)" \
+            --duration "${FAILURE_BURST_SEC}" \
+            --rps "$((LOADTEST_RPS * 3))" \
+            --timeout "0.2" \
+            --mode failure
+
+      # ---------- Recovery check ----------
+      - name: Recovery check (after failure)
+        run: |
+          python .github/scripts/load_test.py \
+            --url "$(cat serving_url.txt)" \
+            --duration "30" \
+            --rps "${LOADTEST_RPS}" \
+            --timeout "${TIMEOUT_SEC}" \
+            --mode normal \
+            --assert_recovery
