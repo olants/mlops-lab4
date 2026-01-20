@@ -96,6 +96,11 @@ jobs:
           databricks jobs --help
           databricks jobs get-run --help
 
+      - name: PUT secrets to databricks
+        run: |
+          databricks secrets put-secret lab4-mlops aws_access_key_id
+          databricks secrets put-secret lab4-mlops aws_secret_access_key
+
       - name: Trigger TRAIN job
         run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_TRAIN_JOB_ID }}" --wait
 
