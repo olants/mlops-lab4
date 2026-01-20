@@ -136,7 +136,10 @@ jobs:
             --duration "${LOADTEST_DURATION_SEC}" \
             --rps "${LOADTEST_RPS}" \
             --timeout "${TIMEOUT_SEC}" \
-            --mode normal
+            --mode normal \
+            --cw_namespace "Lab4/Serving" \
+            --cw_high_res \
+            --cw_flush_every 10
 
       # ---------- Simulate failure ----------
       - name: Simulate failure (bad payload + timeout burst)
@@ -146,7 +149,10 @@ jobs:
             --duration "${FAILURE_BURST_SEC}" \
             --rps "$((LOADTEST_RPS * 3))" \
             --timeout "0.2" \
-            --mode failure
+            --mode failure \
+            --cw_namespace "Lab4/Serving" \
+            --cw_high_res \
+            --cw_flush_every 10
 
       # ---------- Recovery check ----------
       - name: Recovery check (after failure)
@@ -157,4 +163,7 @@ jobs:
             --rps "${LOADTEST_RPS}" \
             --timeout "${TIMEOUT_SEC}" \
             --mode normal \
+            --cw_namespace "Lab4/Serving" \
+            --cw_high_res \
+            --cw_flush_every 10 \
             --assert_recovery
