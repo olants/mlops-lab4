@@ -86,9 +86,9 @@ jobs:
       - name: Terraform apply (CloudWatch dashboard + alarms)
         working-directory: terraform/monitoring
         run: |
-          terraform init
           terraform apply -auto-approve \
-            -var="aws_region=${AWS_REGION}"
+            -var="aws_region=${AWS_REGION}" \
+            -var="serving_endpoint_name=${SERVING_ENDPOINT_NAME}"
 
       # ---------- Trigger Databricks Jobs ----------
       - name: CLI sanity
