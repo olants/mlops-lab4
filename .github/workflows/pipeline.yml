@@ -32,7 +32,7 @@ jobs:
       LOADTEST_DURATION_SEC: "60"
       LOADTEST_RPS: "5"
       FAILURE_BURST_SEC: "20"
-      TIMEOUT_SEC: "2"
+      TIMEOUT_SEC: "20"
 
       AWS_REGION: us-east-1
 
@@ -120,6 +120,13 @@ jobs:
           python .github/scripts/get_serving_url.py "${{ env.SERVING_ENDPOINT_NAME }}" > serving_url.txt
           echo "Serving URL:"
           cat serving_url.txt
+
+      - name: Warm up serving endpoint
+        run: |
+          python .github/scripts/warmup_serving.py \
+            --url "$(cat serving_url.txt)" \
+            --tries 10 \
+            --timeout 60
 
       # ---------- Load test (normal) ----------
       - name: Load test endpoint (steady traffic)
