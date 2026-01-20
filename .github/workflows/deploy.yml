@@ -1,0 +1,155 @@
+name: Deploy Databricks (Terraform)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fail fast if secrets missing
+        run: |
+          if [ -z "$DATABRICKS_HOST" ]; then
+            echo "DATABRICKS_HOST is empty. Add it in GitHub Secrets."
+            exit 1
+          fi
+          if [ -z "$DATABRICKS_TOKEN" ]; then
+            echo "DATABRICKS_TOKEN is empty. Add it in GitHub Secrets."
+            exit 1
+          fi
+          echo "Using host: $DATABRICKS_HOST"
+
+      - name: Install Databricks CLI (new)
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh
+          databricks --version
+          databricks workspace --help
+
+      - name: Check Databricks auth
+        run: |
+          databricks workspace list /
+
+      - name: Debug repo files
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 4 -name "*.ipynb" -print
+          find . -maxdepth 4 -name "drift_check.py" -print
+          find . -maxdepth 4 -name "slo_probe.py" -print
+
+      - name: Sync workspace files
+        run: |
+          WS_ROOT="/Users/olants@gmail.com/mlops-lab4-repo"
+
+          databricks workspace mkdirs "$WS_ROOT"
+
+          # Import notebook (new CLI syntax)
+          databricks workspace import "$WS_ROOT/mlops-lab4" \
+            --overwrite \
+            --format JUPYTER \
+            --file "mlops-lab4.ipynb"
+
+          # Import monitoring directory (new CLI command is import-dir)
+          databricks workspace import-dir "monitoring" "$WS_ROOT/monitoring" --overwrite
+
+          databricks workspace list "$WS_ROOT"
+          databricks workspace list "$WS_ROOT/monitoring"
+
+          echo "Workspace sync done: $WS_ROOT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # Phase 1: create jobs/cluster/secrets only (no serving)
+      # - name: Terraform init/apply (infra only)
+      #   working-directory: terraform
+      #   run: |
+      #     terraform init
+      #     terraform apply -auto-approve \
+      #       -var="databricks_host=${DATABRICKS_HOST}" \
+      #       -var="databricks_token=${DATABRICKS_TOKEN}" \
+      #       -var="serving_token=${DATABRICKS_TOKEN}" \
+      #       -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
+      #       -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
+      #       -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
+      #       -var="enable_serving=false" \
+      #       -var="secret_scope_name=lab4-mlops-${GITHUB_RUN_ID}"
+
+
+      # - name: Trigger training job and wait for completion
+      #   working-directory: terraform
+      #   run: |
+      #     TRAIN_JOB_ID="$(terraform output -raw train_job_id)"
+      #     echo "Train job id: $TRAIN_JOB_ID"
+
+      #     RUN_ID="$(databricks jobs run-now --job-id "$TRAIN_JOB_ID" --output json | python -c "import sys, json; print(json.load(sys.stdin)['run_id'])")"
+      #     echo "Run id: $RUN_ID"
+
+      #     # Poll until run completes
+      #     for i in $(seq 1 120); do
+      #       STATE="$(databricks jobs get-run --run-id "$RUN_ID" --output json | python -c "import sys, json; j=json.load(sys.stdin); print(j['state']['life_cycle_state']+'|'+j['state'].get('result_state',''))")"
+      #       echo "State: $STATE"
+      #       LC="$(echo "$STATE" | cut -d'|' -f1)"
+      #       RS="$(echo "$STATE" | cut -d'|' -f2)"
+      #       if [ "$LC" = "TERMINATED" ] || [ "$LC" = "SKIPPED" ] || [ "$LC" = "INTERNAL_ERROR" ]; then
+      #         if [ "$RS" = "SUCCESS" ]; then
+      #           echo "Training succeeded."
+      #           exit 0
+      #         else
+      #           echo "Training failed: $STATE"
+      #           exit 1
+      #         fi
+      #       fi
+      #       sleep 10
+      #     done
+
+      #     echo "Timed out waiting for training run to finish"
+      #     exit 1
+
+      # - name: Enable serving with latest model version (Phase 2)
+      #   env:
+      #     MODEL_NAME: energy-lstm
+      #   run: |
+      #     python -m pip install --upgrade pip
+      #     pip install databricks-sdk==0.44.0
+
+      #     python - <<'PY'
+      #     import os
+      #     from databricks.sdk import WorkspaceClient
+
+      #     w = WorkspaceClient(host=os.environ["DATABRICKS_HOST"], token=os.environ["DATABRICKS_TOKEN"])
+      #     model = os.environ["MODEL_NAME"]
+
+      #     versions = list(w.model_registry.list_model_versions(name=model))
+      #     if not versions:
+      #       raise SystemExit(f"No versions found for model {model}. Training didn't register it.")
+
+      #     latest = max(int(v.version) for v in versions)
+      #     print("LATEST_VERSION", latest)
+
+      #     # Write tfvars used by Terraform (optional)
+      #     tfvars_path = "terraform/terraform.tfvars"
+      #     with open(tfvars_path, "w", encoding="utf-8") as f:
+      #       f.write(f'blue_model_version = "{latest}"\n')
+      #       f.write(f'green_model_version = "{latest}"\n')
+      #       f.write('blue_traffic_percent = 100\n')
+      #       f.write('green_traffic_percent = 0\n')
+      #     PY
+
+      #     terraform -chdir=terraform apply -auto-approve \
+      #       -var="databricks_host=${DATABRICKS_HOST}" \
+      #       -var="databricks_token=${DATABRICKS_TOKEN}" \
+      #       -var="serving_token=${DATABRICKS_TOKEN}" \
+      #       -var="train_notebook_path=/Users/olants@gmail.com/mlops-lab4-repo/mlops-lab4" \
+      #       -var="drift_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/drift_check.py" \
+      #       -var="slo_py_path=/Users/olants@gmail.com/mlops-lab4-repo/monitoring/slo_probe.py" \
+      #       -var="enable_serving=true" \
+      #       -var="secret_scope_name=lab4-mlops-${GITHUB_RUN_ID}"
