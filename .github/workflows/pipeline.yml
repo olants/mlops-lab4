@@ -85,13 +85,14 @@ jobs:
 
       # ---------- Trigger Databricks Jobs ----------
       - name: Trigger TRAIN job
-        run: python .github/scripts/run_databricks_job.py "${{ env.TRAIN_JOB_NAME }}" --wait
+        run: python .github/scripts/run_databricks_job.py "${{ secrets.DATABRICKS_TRAIN_JOB_ID }}" --wait
+
 
       - name: Trigger DRIFT job (Evidently)
-        run: python .github/scripts/run_databricks_job.py "${{ env.DRIFT_JOB_NAME }}" --wait
+        run: python .github/scripts/run_databricks_job.py "${{ env.DATABRICKS_DRIFT_JOB_ID }}" --wait
 
       - name: Trigger SLO job (publishes CloudWatch metrics)
-        run: python .github/scripts/run_databricks_job.py "${{ env.SLO_JOB_NAME }}" --wait
+        run: python .github/scripts/run_databricks_job.py "${{ env.DATABRICKS_SLO_JOB_ID }}" --wait
 
       # ---------- Resolve serving URL ----------
       - name: Resolve serving endpoint URL
